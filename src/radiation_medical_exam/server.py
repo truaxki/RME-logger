@@ -12,6 +12,7 @@ from pydantic import AnyUrl
 import mcp.server.stdio
 
 from .utils.pdf_processor import PDFProcessor
+from .utils.navmed_database import NavmedDatabase
 
 # Import the database creation function from the init script
 sys.path.append(os.path.join(os.path.dirname(__file__), "utils"))
@@ -26,6 +27,9 @@ pdf_processor = PDFProcessor(INSTRUCTIONS_PATH)
 
 # Database path
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "navmed_radiation_exam.db")
+
+# Initialize NAVMED database interface
+navmed_db = NavmedDatabase(DB_PATH)
 
 server = Server("radiation-medical-exam")
 
@@ -269,6 +273,149 @@ async def handle_list_tools() -> list[types.Tool]:
                 },
                 "required": [],
             },
+        ),
+        types.Tool(
+            name="get-table-schema",
+            description="Get the schema information for a specific NAVMED table including columns, foreign keys, and descriptions",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "table_name": {
+                        "type": "string",
+                        "description": "Name of the NAVMED table",
+                        "enum": ["examinations", "examining_facilities", "medical_history", "laboratory_findings", "urine_tests", "additional_studies", "physical_examination", "abnormal_findings", "assessments", "certifications"]
+                    }
+                },
+                "required": ["table_name"],
+            },
+        ),
+        types.Tool(
+            name="add-exam-data",
+            description="Add data to any NAVMED examination table with validation based on NAVMED 6470/13 requirements",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "table_name": {
+                        "type": "string",
+                        "description": "Name of the NAVMED table to insert data into",
+                        "enum": ["examinations", "examining_facilities", "medical_history", "laboratory_findings", "urine_tests", "additional_studies", "physical_examination", "abnormal_findings", "assessments", "certifications"]
+                    },
+                    "data": {
+                        "type": "object",
+                        "description": "Dictionary of column names and values to insert"
+                    }
+                },
+                "required": ["table_name", "data"],
+            },
+        ),
+        types.Tool(
+            name="get-exam-data", 
+            description="Retrieve data from any NAVMED examination table with optional filtering",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "table_name": {
+                        "type": "string",
+                        "description": "Name of the NAVMED table to query",
+                        "enum": ["examinations", "examining_facilities", "medical_history", "laboratory_findings", "urine_tests", "additional_studies", "physical_examination", "abnormal_findings", "assessments", "certifications"]
+                    },
+                    "filters": {
+                        "type": "object",
+                        "description": "Optional dictionary of column names and values to filter by"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of records to return (default: 10)",
+                        "default": 10
+                    }
+                },
+                "required": ["table_name"],
+            },
+        ),
+        types.Tool(
+            name="get-complete-exam",
+            description="Get complete examination data with all related records from all tables",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "exam_id": {
+                        "type": "integer",
+                        "description": "Examination ID to retrieve complete data for"
+                    }
+                },
+                "required": ["exam_id"],
+            },
+        ),
+        types.Tool(
+            name="create-complete-exam",
+            description="Create a complete examination with all related data sections following NAVMED 6470/13 structure",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "examination_data": {
+                        "type": "object", 
+                        "description": "Complete examination data with sections for examination, medical_history, laboratory_findings, etc.",
+                        "properties": {
+                            "examination": {
+                                "type": "object",
+                                "description": "Main examination record data"
+                            },
+                            "medical_history": {
+                                "type": "object",
+                                "description": "Medical history data (blocks 3-10)"
+                            },
+                            "laboratory_findings": {
+                                "type": "object", 
+                                "description": "Laboratory test results (block 11)"
+                            },
+                            "urine_tests": {
+                                "type": "object",
+                                "description": "Urine test results (block 12)"
+                            },
+                            "additional_studies": {
+                                "type": "object",
+                                "description": "Additional medical studies (block 13)"
+                            },
+                            "physical_examination": {
+                                "type": "object",
+                                "description": "Physical examination findings (blocks 15-19)"
+                            },
+                            "abnormal_findings": {
+                                "type": "object",
+                                "description": "Summary of abnormal findings (block 14)"
+                            },
+                            "assessments": {
+                                "type": "object",
+                                "description": "Medical assessments (blocks 20a, 20b)"
+                            },
+                            "certifications": {
+                                "type": "object",
+                                "description": "Signatures and certifications (blocks 21-23)"
+                            }
+                        },
+                        "required": ["examination"]
+                    }
+                },
+                "required": ["examination_data"],
+            },
+        ),
+        types.Tool(
+            name="get-exam-summary",
+            description="Get a summary of examination(s) for reporting purposes with facility and assessment information",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "exam_id": {
+                        "type": "integer",
+                        "description": "Specific examination ID to get summary for"
+                    },
+                    "patient_ssn": {
+                        "type": "string",
+                        "description": "Patient SSN to get all examinations for (format: XXX-XX-XXXX)"
+                    }
+                },
+                "required": [],
+            },
         )
     ]
 
@@ -406,6 +553,288 @@ async def handle_call_tool(
                 types.TextContent(
                     type="text",
                     text=f"❌ Error creating database: {str(e)}"
+                )
+            ]
+    
+    elif name == "get-table-schema":
+        if not arguments:
+            raise ValueError("Missing arguments")
+
+        table_name = arguments.get("table_name")
+        if not table_name:
+            raise ValueError("Missing table_name")
+
+        try:
+            schema = navmed_db.get_table_schema(table_name)
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"📊 **Schema for {table_name}**\n\n"
+                         f"📋 **Description:** {schema['description']}\n\n"
+                         f"🏗️ **Columns ({len(schema['columns'])}):**\n" + 
+                         "\n".join([
+                             f"  • **{col['name']}** ({col['type']}) - "
+                             f"{'NOT NULL' if col['notnull'] else 'NULL'} - "
+                             f"{'PRIMARY KEY' if col['pk'] else ''} - "
+                             f"Default: {col['dflt_value'] or 'None'}"
+                             for col in schema['columns']
+                         ]) +
+                         (f"\n\n🔗 **Foreign Keys ({len(schema['foreign_keys'])}):**\n" + 
+                          "\n".join([
+                              f"  • {fk['from']} → {fk['table']}.{fk['to']}"
+                              for fk in schema['foreign_keys']
+                          ]) if schema['foreign_keys'] else "\n\n🔗 **Foreign Keys:** None")
+                )
+            ]
+        except Exception as e:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"❌ Error getting schema for {table_name}: {str(e)}"
+                )
+            ]
+    
+    elif name == "add-exam-data":
+        if not arguments:
+            raise ValueError("Missing arguments")
+
+        table_name = arguments.get("table_name")
+        data = arguments.get("data")
+        
+        if not table_name or not data:
+            raise ValueError("Missing table_name or data")
+
+        try:
+            result = navmed_db.add_examination_data(table_name, data)
+            
+            if result["success"]:
+                return [
+                    types.TextContent(
+                        type="text",
+                        text=f"✅ **Data added successfully to {table_name}**\n\n"
+                             f"🆔 **Record ID:** {result['inserted_id']}\n"
+                             f"📝 **Rows affected:** {result['affected_rows']}\n"
+                             f"🏥 **Table:** {table_name}"
+                    )
+                ]
+            else:
+                error_text = "❌ **Validation failed**\n\n" + "\n".join([f"• {error}" for error in result.get("errors", [])])
+                if result.get("error"):
+                    error_text += f"\n\n**Error:** {result['error']}"
+                
+                return [
+                    types.TextContent(
+                        type="text",
+                        text=error_text
+                    )
+                ]
+        except Exception as e:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"❌ Error adding data to {table_name}: {str(e)}"
+                )
+            ]
+    
+    elif name == "get-exam-data":
+        if not arguments:
+            raise ValueError("Missing arguments")
+
+        table_name = arguments.get("table_name")
+        filters = arguments.get("filters", {})
+        limit = arguments.get("limit", 10)
+        
+        if not table_name:
+            raise ValueError("Missing table_name")
+
+        try:
+            results = navmed_db.get_examination_data(table_name, filters, limit)
+            
+            if results:
+                result_text = f"📊 **Found {len(results)} records in {table_name}**\n\n"
+                
+                for i, record in enumerate(results, 1):
+                    result_text += f"**Record {i}:**\n"
+                    for key, value in record.items():
+                        result_text += f"  • **{key}:** {value}\n"
+                    result_text += "\n"
+                
+                return [
+                    types.TextContent(
+                        type="text",
+                        text=result_text
+                    )
+                ]
+            else:
+                return [
+                    types.TextContent(
+                        type="text",
+                        text=f"📭 No records found in {table_name}" + 
+                              (f" matching filters: {filters}" if filters else "")
+                    )
+                ]
+        except Exception as e:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"❌ Error retrieving data from {table_name}: {str(e)}"
+                )
+            ]
+    
+    elif name == "get-complete-exam":
+        if not arguments:
+            raise ValueError("Missing arguments")
+
+        exam_id = arguments.get("exam_id")
+        if not exam_id:
+            raise ValueError("Missing exam_id")
+
+        try:
+            result = navmed_db.get_complete_examination(exam_id)
+            
+            if "error" in result:
+                return [
+                    types.TextContent(
+                        type="text",
+                        text=f"❌ {result['error']}"
+                    )
+                ]
+            
+            # Format the complete examination data
+            result_text = f"🏥 **Complete Examination - ID: {exam_id}**\n\n"
+            
+            # Main examination info
+            exam = result["examination"]
+            result_text += f"**📋 Main Examination:**\n"
+            for key, value in exam.items():
+                result_text += f"  • **{key}:** {value}\n"
+            result_text += "\n"
+            
+            # Related records
+            sections = ["medical_history", "laboratory_findings", "urine_tests", "additional_studies", 
+                       "physical_examination", "abnormal_findings", "assessments", "certifications"]
+            
+            for section in sections:
+                if section in result and result[section]:
+                    result_text += f"**📝 {section.replace('_', ' ').title()}:**\n"
+                    for record in result[section]:
+                        for key, value in record.items():
+                            if key != 'exam_id':  # Skip exam_id as it's redundant
+                                result_text += f"  • **{key}:** {value}\n"
+                    result_text += "\n"
+            
+            return [
+                types.TextContent(
+                    type="text",
+                    text=result_text
+                )
+            ]
+        except Exception as e:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"❌ Error retrieving complete examination: {str(e)}"
+                )
+            ]
+    
+    elif name == "create-complete-exam":
+        if not arguments:
+            raise ValueError("Missing arguments")
+
+        examination_data = arguments.get("examination_data")
+        if not examination_data:
+            raise ValueError("Missing examination_data")
+
+        try:
+            result = navmed_db.create_complete_examination(examination_data)
+            
+            if result["success"]:
+                return [
+                    types.TextContent(
+                        type="text",
+                        text=f"✅ **Complete examination created successfully**\n\n"
+                             f"🆔 **Examination ID:** {result['exam_id']}\n"
+                             f"📊 **Records Created:**\n" + 
+                             "\n".join([f"  • **{table}:** {count} record(s)" 
+                                       for table, count in result['created_records'].items()]) +
+                             f"\n\n🏥 **Ready for medical review and certification**"
+                    )
+                ]
+            else:
+                error_text = "❌ **Failed to create complete examination**\n\n"
+                if result.get("errors"):
+                    error_text += "\n".join([f"• {error}" for error in result["errors"]])
+                if result.get("error"):
+                    error_text += f"**Error:** {result['error']}"
+                
+                return [
+                    types.TextContent(
+                        type="text",
+                        text=error_text
+                    )
+                ]
+        except Exception as e:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"❌ Error creating complete examination: {str(e)}"
+                )
+            ]
+    
+    elif name == "get-exam-summary":
+        if not arguments:
+            arguments = {}
+
+        exam_id = arguments.get("exam_id")
+        patient_ssn = arguments.get("patient_ssn")
+        
+        if not exam_id and not patient_ssn:
+            raise ValueError("Must provide either exam_id or patient_ssn")
+
+        try:
+            result = navmed_db.get_examination_summary(exam_id=exam_id, patient_ssn=patient_ssn)
+            
+            if "error" in result:
+                return [
+                    types.TextContent(
+                        type="text",
+                        text=f"❌ {result['error']}"
+                    )
+                ]
+            
+            examinations = result["examinations"]
+            if not examinations:
+                search_term = f"ID {exam_id}" if exam_id else f"SSN {patient_ssn}"
+                return [
+                    types.TextContent(
+                        type="text",
+                        text=f"📭 No examinations found for {search_term}"
+                    )
+                ]
+            
+            result_text = f"📊 **Examination Summary ({len(examinations)} record(s))**\n\n"
+            
+            for exam in examinations:
+                result_text += f"**🏥 Examination ID: {exam['exam_id']}**\n"
+                result_text += f"  • **Patient:** {exam.get('patient_name', 'N/A')} (SSN: {exam.get('patient_ssn', 'N/A')})\n"
+                result_text += f"  • **Date:** {exam.get('exam_date', 'N/A')}\n"
+                result_text += f"  • **Type:** {exam.get('exam_type', 'N/A')}\n"
+                result_text += f"  • **Facility:** {exam.get('facility_name', 'N/A')}\n"
+                result_text += f"  • **Assessment:** {exam.get('initial_assessment', 'N/A')}\n"
+                result_text += f"  • **Completed:** {exam.get('examination_complete_date', 'N/A')}\n"
+                result_text += "\n"
+            
+            return [
+                types.TextContent(
+                    type="text",
+                    text=result_text
+                )
+            ]
+        except Exception as e:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"❌ Error retrieving examination summary: {str(e)}"
                 )
             ]
     
