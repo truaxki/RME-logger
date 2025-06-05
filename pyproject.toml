@@ -1,0 +1,21 @@
+[project]
+name = "radiation-medical-exam"
+version = "0.1.0"
+description = "RME MCP database control"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [ "mcp>=1.9.3",]
+
+[[project.authors]]
+name = "truaxki"
+email = "truaxki@gmail.com"
+
+[build-system]
+requires = [ "hatchling",]
+build-backend = "hatchling.build"
+
+[project.scripts]
+radiation-medical-exam = "radiation_medical_exam:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/radiation_medical_exam"]
