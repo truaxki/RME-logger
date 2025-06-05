@@ -236,13 +236,39 @@ def create_database(db_path: Path, force: bool = False, include_sample_data: boo
     db_path.parent.mkdir(parents=True, exist_ok=True)
     
     try:
-        # Remove existing database if force is True
+        # If database exists and force is True, we'll drop and recreate tables
         if db_path.exists() and force:
-            db_path.unlink()
-            print(f"Removed existing database: {db_path}")
-        
-        # Create new database
-        print(f"Creating database: {db_path}")
+            print(f"Force recreating database: {db_path}")
+            with sqlite3.connect(db_path) as conn:
+                # Get list of existing tables
+                cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                existing_tables = [row[0] for row in cursor.fetchall()]
+                
+                # Drop existing tables (in reverse order to handle foreign keys)
+                tables_to_drop = [
+                    'certifications', 'assessments', 'abnormal_findings', 
+                    'physical_examination', 'additional_studies', 'urine_tests',
+                    'laboratory_findings', 'medical_history', 'examinations',
+                    'examining_facilities'
+                ]
+                
+                for table in tables_to_drop:
+                    if table in existing_tables:
+                        conn.execute(f"DROP TABLE IF EXISTS {table}")
+                        print(f"Dropped existing table: {table}")
+                
+                # Drop any remaining tables that might exist
+                for table in existing_tables:
+                    if table not in tables_to_drop and table != 'sqlite_sequence':
+                        try:
+                            conn.execute(f"DROP TABLE IF EXISTS {table}")
+                            print(f"Dropped additional table: {table}")
+                        except Exception as e:
+                            print(f"Warning: Could not drop {table}: {e}")
+                
+                conn.commit()
+        else:
+            print(f"Creating database: {db_path}")
         
         with sqlite3.connect(db_path) as conn:
             # Enable foreign key constraints
@@ -265,12 +291,16 @@ def create_database(db_path: Path, force: bool = False, include_sample_data: boo
         with sqlite3.connect(db_path) as conn:
             cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
             tables = [row[0] for row in cursor.fetchall()]
-            print(f"Created {len(tables)} tables: {', '.join(tables)}")
+            navmed_tables = [t for t in tables if t != 'sqlite_sequence']
+            print(f"Created {len(navmed_tables)} NAVMED tables: {', '.join(navmed_tables)}")
             
             if include_sample_data:
-                cursor = conn.execute("SELECT COUNT(*) FROM examinations")
-                exam_count = cursor.fetchone()[0]
-                print(f"Sample data: {exam_count} examination record(s) inserted")
+                try:
+                    cursor = conn.execute("SELECT COUNT(*) FROM examinations")
+                    exam_count = cursor.fetchone()[0]
+                    print(f"Sample data: {exam_count} examination record(s) inserted")
+                except Exception as e:
+                    print(f"Note: Could not count sample data: {e}")
         
         return True
         

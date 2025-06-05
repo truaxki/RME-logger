@@ -4,7 +4,11 @@ version = "0.1.0"
 description = "RME MCP database control"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = [ "mcp>=1.9.3",]
+dependencies = [ 
+    "mcp>=1.9.3",
+    "pypdf>=4.0.0",
+    "aiofiles>=23.0.0",
+]
 
 [[project.authors]]
 name = "truaxki"
