@@ -8,6 +8,7 @@ dependencies = [
     "mcp>=1.9.3",
     "pypdf>=4.0.0",
     "aiofiles>=23.0.0",
+    "cryptography>=41.0.0",
 ]
 
 [[project.authors]]
