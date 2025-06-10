@@ -502,8 +502,10 @@ async def handle_call_tool(
         
         try:
             db_path = Path(DB_PATH)
+            encrypted_db_path = Path(str(db_path) + ".enc")
             
-            # Check if database already exists and has content
+            # Check if regular database already exists and has content
+            regular_db_exists = False
             if db_path.exists() and not force:
                 # Check if database has tables
                 try:
@@ -513,18 +515,45 @@ async def handle_call_tool(
                         navmed_tables = [t for t in existing_tables if t != 'sqlite_sequence']
                         
                         if navmed_tables:
-                            return [
-                                types.TextContent(
-                                    type="text",
-                                    text=f"⚠️ Database already exists at {db_path} with {len(navmed_tables)} tables:\n"
-                                         f"📋 Tables: {', '.join(navmed_tables)}\n\n"
-                                         f"🔧 Use force=true to overwrite existing database\n"
-                                         f"✅ Or use the verification tool to check database integrity"
-                                )
-                            ]
+                            regular_db_exists = True
                 except Exception:
                     # If we can't read the database, treat it as corrupted and allow recreation
                     pass
+            
+            # Check if encrypted database exists
+            encrypted_db_exists = encrypted_db_path.exists()
+            
+            # If either database exists and force is not used, warn the user
+            if (regular_db_exists or encrypted_db_exists) and not force:
+                warning_text = "⚠️ **Existing database(s) found:**\n\n"
+                
+                if regular_db_exists:
+                    # Get table info for regular database
+                    with sqlite3.connect(db_path) as conn:
+                        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                        existing_tables = [row[0] for row in cursor.fetchall()]
+                        navmed_tables = [t for t in existing_tables if t != 'sqlite_sequence']
+                    
+                    warning_text += f"📊 **Regular Database:** {db_path}\n"
+                    warning_text += f"   • Tables ({len(navmed_tables)}): {', '.join(navmed_tables)}\n\n"
+                
+                if encrypted_db_exists:
+                    encrypted_size = encrypted_db_path.stat().st_size
+                    warning_text += f"🔐 **Encrypted Database:** {encrypted_db_path}\n"
+                    warning_text += f"   • File size: {encrypted_size:,} bytes\n\n"
+                
+                warning_text += f"🔧 **Options:**\n"
+                warning_text += f"   • Use `force=true` to overwrite existing database(s)\n"
+                warning_text += f"   • Use existing database with MCP tools\n"
+                warning_text += f"   • Decrypt encrypted database if needed\n"
+                warning_text += f"✅ Or use verification tools to check database integrity"
+                
+                return [
+                    types.TextContent(
+                        type="text",
+                        text=warning_text
+                    )
+                ]
             
             # Create the database
             success = create_database(db_path, force=force, include_sample_data=include_sample_data)
