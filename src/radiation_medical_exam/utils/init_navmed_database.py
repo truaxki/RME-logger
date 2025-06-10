@@ -14,7 +14,13 @@ Options:
     --force          Overwrite existing database if it exists
 """
 
-import sqlite3
+try:
+    import sqlcipher3 as sqlite3
+    USING_SQLCIPHER = True
+except ImportError:
+    import sqlite3
+    USING_SQLCIPHER = False
+
 import argparse
 import os
 import sys
@@ -213,7 +219,7 @@ VALUES (1, '2024-01-15', 'Dr. Jane Medical', '2024-01-15', 'Dr. Jane Medical', '
 """
 
 
-def create_database(db_path: Path, force: bool = False, include_sample_data: bool = True) -> bool:
+def create_database(db_path: Path, force: bool = False, include_sample_data: bool = True, passphrase: str = None) -> bool:
     """
     Create and initialize the NAVMED database.
     
@@ -221,6 +227,7 @@ def create_database(db_path: Path, force: bool = False, include_sample_data: boo
         db_path: Path where the database should be created
         force: If True, overwrite existing database
         include_sample_data: If True, insert sample data for testing
+        passphrase: If provided and using SQLCipher, create encrypted database
         
     Returns:
         True if database was created successfully, False otherwise
@@ -271,6 +278,11 @@ def create_database(db_path: Path, force: bool = False, include_sample_data: boo
             print(f"Creating database: {db_path}")
         
         with sqlite3.connect(db_path) as conn:
+            # If passphrase provided and SQLCipher available, encrypt
+            if passphrase and USING_SQLCIPHER:
+                conn.execute(f"PRAGMA key = '{passphrase}'")
+                print("🔐 Creating encrypted database")
+            
             # Enable foreign key constraints
             conn.execute("PRAGMA foreign_keys = ON")
             

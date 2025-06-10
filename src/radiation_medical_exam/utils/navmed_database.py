@@ -1,4 +1,10 @@
-import sqlite3
+try:
+    import sqlcipher3 as sqlite3
+    USING_SQLCIPHER = True
+except ImportError:
+    import sqlite3
+    USING_SQLCIPHER = False
+
 import json
 from datetime import datetime
 from typing import Optional, Any, Dict, List, Union
@@ -16,13 +22,15 @@ class NavmedDatabase:
     following the NAVMED 6470/13 form structure and requirements.
     """
     
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, db_manager=None):
         """Initialize database connection.
         
         Args:
             db_path (str): Path to SQLite database file
+            db_manager: Optional encrypted database manager for SQLCipher support
         """
         self.db_path = str(Path(db_path).expanduser())
+        self.db_manager = db_manager  # Optional encrypted manager
         self.expected_tables = [
             'examinations', 'examining_facilities', 'medical_history',
             'laboratory_findings', 'urine_tests', 'additional_studies',
@@ -30,12 +38,23 @@ class NavmedDatabase:
             'certifications'
         ]
         
+    def _get_connection(self):
+        """Get database connection (encrypted if manager provided)."""
+        if self.db_manager:
+            # Use encrypted connection
+            return self.db_manager.get_connection()
+        else:
+            # Fallback to regular connection
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys = ON")
+            return conn
+
     def _execute_query(self, query: str, params: tuple = None) -> List[Dict[str, Any]]:
         """Execute a SQL query and return results as a list of dictionaries"""
         logger.debug(f"Executing query: {query}")
         try:
-            with closing(sqlite3.connect(self.db_path)) as conn:
-                conn.row_factory = sqlite3.Row
+            with self._get_connection() as conn:
                 with closing(conn.cursor()) as cursor:
                     if params:
                         cursor.execute(query, params)
